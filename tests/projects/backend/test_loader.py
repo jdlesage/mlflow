@@ -1,5 +1,6 @@
 import entrypoints
 import mock
+import pytest
 
 from mlflow.projects.backend import loader
 from mlflow.projects.backend import databricks
@@ -24,7 +25,7 @@ def test_plugin_does_not_exist():
     def raise_entrypoint_exception(group, name):
         raise entrypoints.NoSuchEntryPoint(group, name)
 
-    with mock.patch("entrypoints.get_single") as mock_get_single:
-        mock_get_single.side_effect = raise_entrypoint_exception
-        backend = loader.load_backend('my_plugin')
-        assert backend is None
+    with pytest.raises(entrypoints.NoSuchEntryPoint):
+        with mock.patch("entrypoints.get_single") as mock_get_single:
+            mock_get_single.side_effect = raise_entrypoint_exception
+            backend = loader.load_backend('my_plugin')

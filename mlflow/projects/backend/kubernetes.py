@@ -2,14 +2,18 @@ from __future__ import absolute_import
 import logging
 import docker
 import time
+import os
 from threading import RLock
 from datetime import datetime
+import yaml
 
 import kubernetes
 from kubernetes.config.config_exception import ConfigException
 
+from mlflow.projects.backend.abstract_backend import AbstractBackend
 from mlflow.exceptions import ExecutionException
 from mlflow.projects.submitted_run import SubmittedRun
+from mlflow.projects import utils
 from mlflow.entities import RunStatus
 
 from shlex import split
@@ -78,6 +82,56 @@ def run_kubernetes_job(project_name, active_run, image_tag, image_digest, comman
     api_instance.create_namespaced_job(namespace=job_namespace,
                                        body=job_template, pretty=True)
     return KubernetesSubmittedRun(active_run.info.run_id, job_name, job_namespace)
+
+
+def _parse_kubernetes_config(backend_config):
+    """
+    Creates build context tarfile containing Dockerfile and project code, returning path to tarfile
+    """
+    if not backend_config:
+        raise ExecutionException("Backend_config file not found.")
+    kube_config = backend_config.copy()
+    if 'kube-job-template-path' not in backend_config.keys():
+        raise ExecutionException("'kube-job-template-path' attribute must be specified in "
+                                 "backend_config.")
+    kube_job_template = backend_config['kube-job-template-path']
+    if os.path.exists(kube_job_template):
+        with open(kube_job_template, 'r') as job_template:
+            yaml_obj = yaml.safe_load(job_template.read())
+        kube_job_template = yaml_obj
+        kube_config['kube-job-template'] = kube_job_template
+    else:
+        raise ExecutionException("Could not find 'kube-job-template-path': {}".format(
+            kube_job_template))
+    if 'kube-context' not in backend_config.keys():
+        _logger.debug("Could not find kube-context in backend_config."
+                      " Using current context or in-cluster config.")
+    if 'repository-uri' not in backend_config.keys():
+        raise ExecutionException("Could not find 'repository-uri' in backend_config.")
+    return kube_config
+
+
+class KubernetesBackend(AbstractBackend):
+    def run(self, active_run, uri, entry_point, parameters, backend_config):
+        env_vars = utils.generate_env_vars_to_attach_to_run(active_run)
+        docker_image = backend_config.pop('image')
+        command_args = backend_config.pop('command_args')
+        kube_config = _parse_kubernetes_config(backend_config)
+        image_digest = push_image_to_registry(docker_image.tags[0])
+        return run_kubernetes_job(
+            backend_config['project_name'],
+            active_run,
+            docker_image.tags[0],
+            image_digest,
+            command_args,
+            env_vars,
+            kube_config.get('kube-context', None),
+            kube_config['kube-job-template']
+        )
+
+    @property
+    def name(self):
+        return "kubernetes"
 
 
 class KubernetesSubmittedRun(SubmittedRun):
