@@ -157,6 +157,7 @@ def _run(uri, experiment_id, entry_point="main", version=None, parameters=None,
         backend_config = dict()
 
     if backend_name == 'local' or not backend_name:
+        backend_config['local_project_dir'] = work_dir
         backend_config['storage_dir'] = storage_dir
         backend_config['synchronous'] = synchronous
         backend_config['use_conda'] = use_conda
